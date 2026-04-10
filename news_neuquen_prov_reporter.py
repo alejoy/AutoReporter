@@ -162,7 +162,7 @@ def publicar_wordpress(titulo, cuerpo, fecha_hoy):
     post = {
         'title': titulo,
         'content': html_final,
-        'status': 'publish'
+        'status': 'draft'
     }
     r = requests.post(f"{WORDPRESS_URL}/wp-json/wp/v2/posts", json=post, auth=auth)
     if r.status_code == 201:
