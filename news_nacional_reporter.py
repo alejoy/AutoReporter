@@ -14,9 +14,9 @@ WORDPRESS_URL = os.environ.get("WORDPRESS_URL").rstrip('/')
 
 # --- FUENTES RSS NACIONALES ---
 RSS_FEEDS = [
-    "https://www.infobae.com/feeds/rss/",
     "https://www.lanacion.com.ar/arc/outboundfeeds/rss/",
-    "https://www.clarin.com/rss/",
+    "https://www.perfil.com/feed",
+    "https://www.lmneuquen.com/rss/pais.xml",
 ]
 
 # --- TRADUCCIÓN DE FECHAS ---

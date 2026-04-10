@@ -14,10 +14,9 @@ WORDPRESS_URL = os.environ.get("WORDPRESS_URL").rstrip('/')
 
 # --- FUENTES RSS NEUQUÉN PROVINCIA ---
 RSS_FEEDS = [
-    "https://www.lmneuquen.com/rss/feed.xml",
+    "https://www.lmneuquen.com/rss/neuquen.xml",
     "https://www.rionegro.com.ar/feed/",
-    "https://www.anb.com.ar/feed/",
-    "https://www.adn.neuquen.gov.ar/feed/",
+    "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
 ]
 
 # --- TRADUCCIÓN DE FECHAS ---

@@ -14,10 +14,9 @@ WORDPRESS_URL = os.environ.get("WORDPRESS_URL").rstrip('/')
 
 # --- FUENTES RSS NEUQUÉN CIUDAD ---
 RSS_FEEDS = [
-    "https://www.lmneuquen.com/rss/feed.xml",
-    "https://www.anb.com.ar/feed/",
-    "https://www.neuquen.gov.ar/feed/",
-    "https://www.diarioadn.com/feed/",
+    "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
+    "https://www.lmneuquen.com/rss/home.xml",
+    "https://www.rionegro.com.ar/feed/",
 ]
 
 # --- PALABRAS CLAVE PARA FILTRAR NOTICIAS DE LA CIUDAD ---
