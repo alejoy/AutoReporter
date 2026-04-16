@@ -8,23 +8,15 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURACIÓN ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY")
 WORDPRESS_USER = os.environ.get("WORDPRESS_USER")
 WORDPRESS_APP_PASSWORD = os.environ.get("WORDPRESS_APP_PASSWORD")
 WORDPRESS_URL = os.environ.get("WORDPRESS_URL").rstrip('/')
 
-# --- FUENTES RSS NEUQUÉN CIUDAD ---
+# --- FUENTES RSS NACIONALES ---
 RSS_FEEDS = [
     "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
     "https://www.lmneuquen.com/rss/home.xml",
     "https://www.rionegro.com.ar/feed/",
-]
-
-# Palabras clave para priorizar noticias de la ciudad capital
-PALABRAS_CIUDAD = [
-    'neuquén capital', 'ciudad de neuquén', 'municipio', 'intendente',
-    'concejo deliberante', 'vecinos', 'barrio', 'calle', 'plaza',
-    'transporte urbano', 'ciudad', 'neuquén city', 'capital neuquina'
 ]
 
 DIAS_SEMANA = {
@@ -37,6 +29,9 @@ MESES = {
     'September': 'Septiembre', 'October': 'Octubre', 'November': 'Noviembre', 'December': 'Diciembre'
 }
 
+NS_MEDIA = 'http://search.yahoo.com/mrss/'
+NS_CONTENT = 'http://purl.org/rss/1.0/modules/content/'
+
 def obtener_fecha_en_espanol():
     now = datetime.now()
     dia_es = DIAS_SEMANA.get(now.strftime("%A"), now.strftime("%A"))
@@ -48,13 +43,31 @@ def limpiar_html(texto):
     texto = re.sub(r'\s+', ' ', texto).strip()
     return texto[:400]
 
-def es_noticia_de_ciudad(titulo, descripcion):
-    texto = (titulo + " " + descripcion).lower()
-    return any(palabra in texto for palabra in PALABRAS_CIUDAD)
+def extraer_imagen_item(item):
+    """Extrae la URL de imagen de un item RSS por múltiples métodos."""
+    # 1. media:content
+    el = item.find(f'{{{NS_MEDIA}}}content')
+    if el is not None and el.get('url', ''):
+        return el.get('url')
+    # 2. media:thumbnail
+    el = item.find(f'{{{NS_MEDIA}}}thumbnail')
+    if el is not None and el.get('url', ''):
+        return el.get('url')
+    # 3. enclosure
+    enclosure = item.find('enclosure')
+    if enclosure is not None and 'image' in enclosure.get('type', ''):
+        return enclosure.get('url', '')
+    # 4. <img> dentro de description o content:encoded
+    for tag in ['description', f'{{{NS_CONTENT}}}encoded']:
+        texto = item.findtext(tag, '')
+        if texto:
+            match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', texto)
+            if match and match.group(1).startswith('http'):
+                return match.group(1)
+    return None
 
 def obtener_noticias_rss():
-    noticias_ciudad = []
-    noticias_generales = []
+    noticias = []
     headers = {'User-Agent': 'Mozilla/5.0 (AutoReporter/1.0)'}
     for url in RSS_FEEDS:
         try:
@@ -62,22 +75,17 @@ def obtener_noticias_rss():
             res = requests.get(url, headers=headers, timeout=10)
             res.raise_for_status()
             root = ET.fromstring(res.content)
-            for item in root.findall('.//item')[:8]:
+            for item in root.findall('.//item')[:6]:
                 titulo = item.findtext('title', '').strip()
                 descripcion = limpiar_html(item.findtext('description', ''))
+                img_url = extraer_imagen_item(item)
                 if titulo and len(titulo) > 10:
-                    entrada = f"TITULAR: {titulo}\nCONTEXTO: {descripcion}"
-                    if es_noticia_de_ciudad(titulo, descripcion):
-                        noticias_ciudad.append(entrada)
-                    else:
-                        noticias_generales.append(entrada)
+                    noticias.append({'titulo': titulo, 'descripcion': descripcion, 'img_url': img_url})
         except Exception as e:
             print(f"⚠️ Error en {url}: {e}")
         time.sleep(0.5)
-
-    # Completar con generales si hay pocas de ciudad
-    noticias = noticias_ciudad + noticias_generales[:max(0, 10 - len(noticias_ciudad))]
-    print(f"✅ {len(noticias)} noticias obtenidas ({len(noticias_ciudad)} de ciudad).")
+    con_imagen = sum(1 for n in noticias if n['img_url'])
+    print(f"✅ {len(noticias)} noticias ({con_imagen} con imagen).")
     return noticias[:15]
 
 def llamar_gemini(prompt, max_tokens=2500):
@@ -85,213 +93,148 @@ def llamar_gemini(prompt, max_tokens=2500):
     headers = {'Content-Type': 'application/json'}
     for modelo in modelos:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": max_tokens}
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.7, "maxOutputTokens": max_tokens}}
         try:
-            print(f"👉 Probando modelo: {modelo}...", end=" ")
+            print(f"👉 Probando: {modelo}...", end=" ")
             res = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
             if res.status_code == 200:
                 print("✅")
                 return res.json()['candidates'][0]['content']['parts'][0]['text']
             else:
-                print(f"❌ Error {res.status_code}")
+                print(f"❌ {res.status_code}")
         except Exception as e:
-            print(f"⚠️ Error de red: {e}")
+            print(f"⚠️ {e}")
         time.sleep(1)
     return None
 
 def seleccionar_temas(noticias, fecha_hoy):
-    """Pide a Gemini que elija los 2 temas más relevantes para la ciudad de Neuquén."""
-    titulares = "\n".join([n.split("\n")[0].replace("TITULAR: ", "") for n in noticias])
-    prompt = f"""Analizá estos titulares de noticias del {fecha_hoy}, enfocados en la ciudad de Neuquén capital:
+    titulares = "\n".join([f"{i}. {n['titulo']}" for i, n in enumerate(noticias)])
+    prompt = f"""Analizá estos titulares de noticias argentinas del {fecha_hoy}:
 
 {titulares}
 
-Seleccioná los 2 temas más relevantes para los vecinos de la ciudad de Neuquén.
-Preferí noticias sobre servicios municipales, obras, transporte, seguridad, cultura o economía local.
-Si no hay noticias específicamente de la ciudad, elegí las más relevantes de la región.
+Seleccioná los 2 más relevantes para los vecinos de la ciudad de Neuquén capital. Preferí servicios, obras, transporte o seguridad local.
 
-Respondé ÚNICAMENTE con este JSON válido, sin texto adicional ni bloques de código:
+Respondé ÚNICAMENTE con JSON válido, sin texto adicional:
 [
-  {{
-    "titulo_sugerido": "Título periodístico atractivo para el artículo",
-    "resumen_tema": "Descripción breve del tema en 1-2 oraciones",
-    "keywords_imagen": "2 o 3 palabras clave en INGLÉS para buscar foto (ej: city argentina urban street)"
-  }},
-  {{
-    "titulo_sugerido": "...",
-    "resumen_tema": "...",
-    "keywords_imagen": "..."
-  }}
+  {{"indice": 0, "titulo_sugerido": "Título periodístico atractivo", "resumen_tema": "Descripción en 1-2 oraciones"}},
+  {{"indice": 1, "titulo_sugerido": "...", "resumen_tema": "..."}}
 ]"""
-    respuesta = llamar_gemini(prompt, max_tokens=500)
+    respuesta = llamar_gemini(prompt, max_tokens=400)
     if not respuesta:
         return None
     try:
         respuesta = re.sub(r'```(?:json)?', '', respuesta).strip()
-        temas = json.loads(respuesta)
-        return temas if isinstance(temas, list) else None
+        seleccion = json.loads(respuesta)
+        if not isinstance(seleccion, list):
+            return None
+        for tema in seleccion:
+            idx = tema.get('indice', 0)
+            tema['img_url'] = noticias[idx]['img_url'] if 0 <= idx < len(noticias) else None
+        return seleccion
     except json.JSONDecodeError as e:
-        print(f"⚠️ Error al parsear JSON de temas: {e}")
-        print(f"Respuesta recibida: {respuesta[:300]}")
+        print(f"⚠️ Error JSON: {e}\n{respuesta[:300]}")
         return None
 
 def generar_articulo(tema, fecha_hoy):
-    """Genera un artículo periodístico sobre un tema de la ciudad de Neuquén."""
     prompt = f"""Sos un periodista de la ciudad de Neuquén, cercano a los vecinos y al día con la realidad local.
-Escribís sobre lo que afecta la vida cotidiana de los neuquinos: el transporte, los servicios, las obras,
-el Concejo Deliberante, la gestión municipal y los barrios.
-Tu tono es directo y honesto: hablás de los problemas sin catastrofismo, y de las soluciones sin hacer
-propaganda. Le hablás al vecino común, que quiere entender qué pasa en su ciudad.
+Escribís sobre lo que afecta la vida cotidiana: el transporte, los servicios, las obras y la gestión municipal.
+Tu tono es directo y honesto: hablás de los problemas sin catastrofismo y de las soluciones sin propaganda.
 
 FECHA: {fecha_hoy}
 TEMA: {tema['titulo_sugerido']}
 CONTEXTO: {tema['resumen_tema']}
 
-Escribí una nota periodística completa en HTML sobre este tema de la ciudad. La nota debe:
-- Explicar el tema con claridad para cualquier vecino de Neuquén
-- Describir el impacto concreto en la vida cotidiana de los habitantes
-- Aportar contexto local (barrios, calles, instituciones conocidas si corresponde)
-- Cerrar con información útil o una pregunta que invite a la participación ciudadana
+Escribí una nota periodística completa en HTML:
+- Explicar el tema con contexto claro
+- Analizar el impacto en los argentinos con datos concretos si los conocés
+- Perspectiva editorial que valore la eficiencia y la transparencia
+- Cerrar con una reflexión que invite a pensar
 
 REGLAS:
-- NO saludes ni te presentes. Empezá DIRECTO con <h1>.
-- TÍTULO en <h1>: El título sugerido o uno más atractivo
-- Usá <h2> para secciones, <p> para párrafos, <strong> para destacar datos
-- Extensión: 4 a 6 párrafos bien desarrollados
-- SOLO HTML, sin markdown
-- Español rioplatense, tono cercano y vecinal"""
+- NO saludes. Empezá DIRECTO con <h1>.
+- Usá <h2>, <p>, <strong>
+- 4 a 6 párrafos bien desarrollados
+- SOLO HTML, sin markdown. Español rioplatense."""
     return llamar_gemini(prompt, max_tokens=2000)
-
-def buscar_imagen_pixabay(keywords):
-    if not PIXABAY_API_KEY:
-        print("⚠️ PIXABAY_API_KEY no configurada, se omite imagen.")
-        return None
-    try:
-        url = "https://pixabay.com/api/"
-        params = {
-            'key': PIXABAY_API_KEY,
-            'q': keywords,
-            'image_type': 'photo',
-            'orientation': 'horizontal',
-            'per_page': 5,
-            'safesearch': 'true',
-            'min_width': 800,
-        }
-        res = requests.get(url, params=params, timeout=10)
-        if res.status_code == 200:
-            hits = res.json().get('hits', [])
-            if hits:
-                print(f"🖼️ Imagen encontrada: {hits[0]['pageURL']}")
-                return hits[0]['webformatURL']
-        print(f"⚠️ Pixabay sin resultados para: {keywords}")
-    except Exception as e:
-        print(f"⚠️ Error buscando imagen: {e}")
-    return None
 
 def subir_imagen_wordpress(img_url, slug):
     try:
-        img_data = requests.get(img_url, timeout=15).content
-        nombre_archivo = re.sub(r'[^a-z0-9]', '-', slug.lower())[:40] + '.jpg'
-        auth = (WORDPRESS_USER, WORDPRESS_APP_PASSWORD)
-        headers = {
-            'Content-Disposition': f'attachment; filename="{nombre_archivo}"',
-            'Content-Type': 'image/jpeg',
-        }
+        headers = {'User-Agent': 'Mozilla/5.0 (AutoReporter/1.0)'}
+        img_res = requests.get(img_url, headers=headers, timeout=15)
+        img_res.raise_for_status()
+        content_type = img_res.headers.get('Content-Type', 'image/jpeg').split(';')[0]
+        ext = 'jpg' if 'jpeg' in content_type or 'jpg' in content_type else \
+              'png' if 'png' in content_type else 'webp' if 'webp' in content_type else 'jpg'
+        nombre = re.sub(r'[^a-z0-9]', '-', slug.lower())[:40] + f'.{ext}'
         r = requests.post(
             f"{WORDPRESS_URL}/wp-json/wp/v2/media",
-            headers=headers,
-            data=img_data,
-            auth=auth,
+            headers={'Content-Disposition': f'attachment; filename="{nombre}"', 'Content-Type': content_type},
+            data=img_res.content,
+            auth=(WORDPRESS_USER, WORDPRESS_APP_PASSWORD),
             timeout=30
         )
         if r.status_code == 201:
             media_id = r.json()['id']
-            print(f"🖼️ Imagen subida a WordPress (ID: {media_id})")
+            print(f"🖼️ Imagen subida (ID: {media_id})")
             return media_id
         else:
             print(f"⚠️ Error subiendo imagen: {r.status_code}")
     except Exception as e:
-        print(f"⚠️ Error subiendo imagen: {e}")
+        print(f"⚠️ Error con imagen: {e}")
     return None
 
 def limpiar_respuesta(texto):
     texto = texto.replace('```html', '').replace('```', '').strip()
     if "<h1>" in texto:
         texto = texto[texto.find("<h1>"):]
-    titulo_match = re.search(r'<h1>(.*?)</h1>', texto, re.IGNORECASE | re.DOTALL)
-    if titulo_match:
-        titulo = re.sub(r'<[^>]+>', '', titulo_match.group(1)).strip()
-        cuerpo = re.sub(r'<h1>.*?</h1>', '', texto, count=1, flags=re.IGNORECASE | re.DOTALL).strip()
-    else:
-        titulo = f"Ciudad de Neuquén hoy — {obtener_fecha_en_espanol()}"
-        cuerpo = texto
+    m = re.search(r'<h1>(.*?)</h1>', texto, re.IGNORECASE | re.DOTALL)
+    titulo = re.sub(r'<[^>]+>', '', m.group(1)).strip() if m else f"Ciudad de Neuquén hoy — {obtener_fecha_en_espanol()}"
+    cuerpo = re.sub(r'<h1>.*?</h1>', '', texto, count=1, flags=re.IGNORECASE | re.DOTALL).strip() if m else texto
     return titulo, cuerpo
 
 def publicar_wordpress(titulo, cuerpo, fecha_hoy, media_id=None):
     html_final = f"""
 <div style="font-family: 'Georgia', serif; font-size: 18px; line-height: 1.8; color: #1a1a2e; max-width: 860px; margin: auto;">
-
-  <div style="background: linear-gradient(135deg, #7b2d00 0%, #c45e00 60%, #e07b39 100%); color: white; padding: 35px; border-radius: 12px; margin-bottom: 35px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);">
+  <div style="background: linear-gradient(135deg, #7b2d00 0%, #c45e00 60%, #e07b39 100%); color: white; padding: 35px; border-radius: 12px; margin-bottom: 35px;">
     <p style="text-transform: uppercase; letter-spacing: 3px; font-size: 12px; margin: 0 0 8px; opacity: 0.6; font-family: sans-serif;">Noticias · Ciudad de Neuquén</p>
     <div style="font-size: 15px; opacity: 0.7;">{fecha_hoy}</div>
   </div>
-
-  <div style="background: white; padding: 10px 5px;">
-    {cuerpo}
-  </div>
-
-</div>
-"""
-    auth = (WORDPRESS_USER, WORDPRESS_APP_PASSWORD)
-    post = {
-        'title': titulo,
-        'content': html_final,
-        'status': 'draft',
-    }
+  <div style="padding: 10px 5px;">{cuerpo}</div>
+</div>"""
+    post = {'title': titulo, 'content': html_final, 'status': 'draft'}
     if media_id:
         post['featured_media'] = media_id
-
-    r = requests.post(f"{WORDPRESS_URL}/wp-json/wp/v2/posts", json=post, auth=auth)
+    r = requests.post(f"{WORDPRESS_URL}/wp-json/wp/v2/posts", json=post, auth=(WORDPRESS_USER, WORDPRESS_APP_PASSWORD))
     if r.status_code == 201:
         print(f"✅ Borrador creado: {titulo}")
     else:
-        print(f"❌ Error al publicar: {r.status_code} — {r.text[:300]}")
+        print(f"❌ Error: {r.status_code} — {r.text[:300]}")
 
 def main():
     fecha_hoy = obtener_fecha_en_espanol()
     print(f"\n=== NOTICIAS CIUDAD DE NEUQUÉN: {fecha_hoy} ===\n")
-
     noticias = obtener_noticias_rss()
     if not noticias:
-        print("❌ No se obtuvieron noticias. Abortando.")
+        print("❌ Sin noticias. Abortando.")
         return
-
     temas = seleccionar_temas(noticias, fecha_hoy)
     if not temas:
-        print("❌ No se pudieron seleccionar temas. Abortando.")
+        print("❌ Sin temas seleccionados. Abortando.")
         return
-
-    print(f"📋 {len(temas)} temas seleccionados.")
-
     for i, tema in enumerate(temas, 1):
-        print(f"\n--- Procesando nota {i}/{len(temas)}: {tema['titulo_sugerido']} ---")
-
+        print(f"\n--- Nota {i}: {tema['titulo_sugerido']} ---")
         texto_ia = generar_articulo(tema, fecha_hoy)
         if not texto_ia:
-            print("❌ Falló la generación del artículo. Saltando.")
+            print("❌ Falló generación. Saltando.")
             continue
-
         titulo, cuerpo = limpiar_respuesta(texto_ia)
-
         media_id = None
-        if tema.get('keywords_imagen'):
-            img_url = buscar_imagen_pixabay(tema['keywords_imagen'])
-            if img_url:
-                media_id = subir_imagen_wordpress(img_url, titulo)
-
+        if tema.get('img_url'):
+            print(f"🖼️ Imagen: {tema['img_url']}")
+            media_id = subir_imagen_wordpress(tema['img_url'], titulo)
+        else:
+            print("ℹ️ Sin imagen en el feed para esta noticia.")
         publicar_wordpress(titulo, cuerpo, fecha_hoy, media_id)
         time.sleep(3)
 

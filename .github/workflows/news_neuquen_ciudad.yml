@@ -1,32 +1,24 @@
-name: Daily News Neuquén Ciudad Reporter
+name: Daily news neuquen ciudad Reporter
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 11:00 UTC = 08:00 AM Argentina
+    - cron: '0 11 * * *'  # 08:00 AM Argentina
   workflow_dispatch:
 
 jobs:
-  report_news_neuquen_ciudad:
+  run_reporter:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
-
-      - name: Run Neuquén city news script
+        run: pip install requests
+      - name: Run script
         run: python news_neuquen_ciudad_reporter.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           WORDPRESS_USER: ${{ secrets.WORDPRESS_USER }}
           WORDPRESS_APP_PASSWORD: ${{ secrets.WORDPRESS_APP_PASSWORD }}
           WORDPRESS_URL: ${{ secrets.WORDPRESS_URL }}
