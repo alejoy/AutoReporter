@@ -36,66 +36,79 @@ def obtener_fecha_en_espanol():
 
 def limpiar_html(texto):
     texto = re.sub(r'<[^>]+>', '', texto or '')
-    return re.sub(r'\s+', ' ', texto).strip()[:400]
-
-def obtener_og_image(url):
-    """Fetches the article page and extracts the og:image URL."""
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (AutoReporter/1.0)'}
-        res = requests.get(url, headers=headers, timeout=10)
-        res.raise_for_status()
-        # Search for og:image in the HTML
-        match = re.search(
-            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-            res.text, re.IGNORECASE
-        )
-        if not match:
-            # Try alternate attribute order
-            match = re.search(
-                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
-                res.text, re.IGNORECASE
-            )
-        if match:
-            img_url = match.group(1)
-            if img_url.startswith('http'):
-                print(f"🖼️ og:image encontrada")
-                return img_url
-    except Exception as e:
-        print(f"⚠️ Error obteniendo imagen de {url}: {e}")
-    return None
+    return re.sub(r'\s+', ' ', texto).strip()
 
 def obtener_noticias_rss():
     noticias = []
     headers = {'User-Agent': 'Mozilla/5.0 (AutoReporter/1.0)'}
     for url in RSS_FEEDS:
         try:
-            print(f"📡 Obteniendo: {url}")
+            print(f"📡 {url}")
             res = requests.get(url, headers=headers, timeout=10)
             res.raise_for_status()
             root = ET.fromstring(res.content)
             for item in root.findall('.//item')[:6]:
                 titulo = item.findtext('title', '').strip()
-                descripcion = limpiar_html(item.findtext('description', ''))
                 link = item.findtext('link', '').strip()
-                if titulo and len(titulo) > 10:
-                    noticias.append({'titulo': titulo, 'descripcion': descripcion, 'link': link})
+                if titulo and len(titulo) > 10 and link:
+                    noticias.append({'titulo': titulo, 'link': link})
         except Exception as e:
             print(f"⚠️ Error en {url}: {e}")
         time.sleep(0.5)
-    print(f"✅ {len(noticias)} noticias obtenidas.")
+    print(f"✅ {len(noticias)} noticias encontradas.")
     return noticias[:15]
 
-def llamar_gemini(prompt, max_tokens=2000):
+def obtener_articulo_completo(url):
+    """
+    Descarga el artículo original y extrae:
+    - og:image: imagen destacada real de la nota
+    - texto: cuerpo completo del artículo para usar como contexto
+    """
+    og_image = None
+    texto_articulo = ""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (AutoReporter/1.0)'}
+        res = requests.get(url, headers=headers, timeout=12)
+        res.raise_for_status()
+        html = res.text
+
+        # --- Extraer og:image ---
+        for patron in [
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        ]:
+            m = re.search(patron, html, re.IGNORECASE)
+            if m and m.group(1).startswith('http'):
+                og_image = m.group(1)
+                print(f"🖼️  og:image: {og_image}")
+                break
+
+        if not og_image:
+            print("⚠️  No se encontró og:image en el artículo.")
+
+        # --- Extraer texto del artículo ---
+        parrafos = re.findall(r'<p[^>]*>(.*?)</p>', html, re.DOTALL | re.IGNORECASE)
+        textos = [limpiar_html(p) for p in parrafos]
+        textos = [t for t in textos if len(t) > 60]  # descartar párrafos cortos/nav
+        texto_articulo = '\n\n'.join(textos[:20])
+        print(f"📄 Texto extraído: {len(texto_articulo)} caracteres.")
+
+    except Exception as e:
+        print(f"⚠️ Error descargando artículo: {e}")
+
+    return og_image, texto_articulo
+
+def llamar_gemini(prompt, max_tokens=1500):
     modelos = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash"]
     headers = {'Content-Type': 'application/json'}
     for modelo in modelos:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.65, "maxOutputTokens": max_tokens}
+            "generationConfig": {"temperature": 0.5, "maxOutputTokens": max_tokens}
         }
         try:
-            print(f"👉 Probando: {modelo}...", end=" ")
+            print(f"👉 {modelo}...", end=" ")
             res = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
             if res.status_code == 200:
                 print("✅")
@@ -108,18 +121,18 @@ def llamar_gemini(prompt, max_tokens=2000):
 
 def seleccionar_temas(noticias, fecha_hoy):
     titulares = "\n".join([f"{i}. {n['titulo']}" for i, n in enumerate(noticias)])
-    prompt = f"""Estos son titulares de noticias de Neuquén provincia del {fecha_hoy}:
+    prompt = f"""Titulares nacionales del {fecha_hoy}:
 
 {titulares}
 
 Elegí los 2 más importantes del día para los argentinos. Priorizá política nacional, economía, justicia o seguridad. Descartá farándula y deportes si hay temas más relevantes.
 
-Respondé SOLO con JSON, sin texto adicional:
+Respondé SOLO con JSON válido:
 [
-  {{"indice": 0, "titulo_sugerido": "Título periodístico", "resumen_tema": "Contexto en 1-2 oraciones"}},
-  {{"indice": 1, "titulo_sugerido": "...", "resumen_tema": "..."}}
+  {{"indice": 0, "titulo_sugerido": "Título periodístico"}},
+  {{"indice": 1, "titulo_sugerido": "..."}}
 ]"""
-    respuesta = llamar_gemini(prompt, max_tokens=400)
+    respuesta = llamar_gemini(prompt, max_tokens=200)
     if not respuesta:
         return None
     try:
@@ -129,56 +142,70 @@ Respondé SOLO con JSON, sin texto adicional:
             return None
         for tema in seleccion:
             idx = tema.get('indice', 0)
-            tema['link'] = noticias[idx]['link'] if 0 <= idx < len(noticias) else ''
+            if 0 <= idx < len(noticias):
+                tema['link'] = noticias[idx]['link']
+                tema['titulo_original'] = noticias[idx]['titulo']
+            else:
+                tema['link'] = ''
+                tema['titulo_original'] = ''
         return seleccion
     except Exception as e:
         print(f"⚠️ Error JSON: {e}\n{respuesta[:200]}")
         return None
 
-def generar_articulo(tema, fecha_hoy):
+def generar_articulo(titulo_sugerido, texto_fuente):
     prompt = f"""Sos un redactor periodístico para un portal de noticias de Argentina.
-Tu estilo es el del periodismo informativo estándar: claro, directo, sin opinión personal y sin editoriales.
-Escribís como lo hace un diario regional serio.
+Tu tarea es redactar una nota periodística basándote EXCLUSIVAMENTE en el texto fuente que te doy.
+No inventes datos, cifras, nombres ni hechos que no estén en el texto fuente.
+Si el texto fuente tiene citas textuales, podés usarlas.
 
-TEMA: {tema['titulo_sugerido']}
-CONTEXTO: {tema['resumen_tema']}
+TEXTO FUENTE (artículo original):
+\"\"\"
+{texto_fuente[:3000]}
+\"\"\"
 
-Escribí una nota periodística completa en HTML puro siguiendo estas pautas:
+TÍTULO PARA LA NOTA: {titulo_sugerido}
+
+Redactá la nota en HTML siguiendo estas reglas:
 
 ESTILO:
-- Pirámide invertida: el dato más importante va primero
-- Párrafos de 3 a 5 líneas, fluidos y bien conectados
-- Usá <strong> solo para nombres propios, cifras clave o términos técnicos la primera vez que aparecen
-- Podés incluir citas de funcionarios o fuentes con su cargo y nombre
-- Tono neutro e informativo, sin adjetivos valorativos ni frases de opinión
-- NUNCA uses frases como "es importante destacar", "vale la pena mencionar", "desde una perspectiva", "en conclusión", "en resumen"
-- NO pongas la fecha al inicio de la nota
-- NO uses encabezados de sección (<h2>, <h3>): solo párrafos corridos
-- La nota debe leerse como una pieza periodística nacional lista para publicar
+- Pirámide invertida: el dato más importante primero
+- Párrafos de 3 a 5 líneas, fluidos
+- Usá <strong> para nombres propios, cifras y términos clave la primera vez
+- Podés usar citas del texto fuente con el nombre y cargo de quien habla
+- Tono informativo y neutro
+- PROHIBIDO: "es importante destacar", "vale la pena mencionar", "desde una perspectiva", "cabe señalar", "en conclusión", "en este contexto", "resulta relevante"
+- NO escribas la fecha
+- NO uses <h2> ni <h3>, solo párrafos
 
 FORMATO:
-- Empezá DIRECTO con <p>. Sin <h1> ni título.
+- Empezá DIRECTO con <p>. Sin título, sin encabezado.
 - Solo etiquetas <p> y <strong>
 - 4 a 5 párrafos
-- SOLO HTML, sin markdown ni bloques de código
-- Español rioplatense neutro"""
+- Solo HTML, sin markdown"""
     return llamar_gemini(prompt, max_tokens=1500)
 
-def subir_imagen_wordpress(img_url, slug):
+def subir_imagen_wordpress(img_url):
+    """Descarga la imagen y la sube a WordPress como media. Devuelve el ID."""
     try:
+        print(f"⬇️  Descargando imagen...")
         headers = {'User-Agent': 'Mozilla/5.0 (AutoReporter/1.0)'}
         img_res = requests.get(img_url, headers=headers, timeout=15)
         img_res.raise_for_status()
-        content_type = img_res.headers.get('Content-Type', 'image/jpeg').split(';')[0].strip()
-        if 'jpeg' in content_type or 'jpg' in content_type:
-            ext = 'jpg'
-        elif 'png' in content_type:
-            ext = 'png'
-        elif 'webp' in content_type:
-            ext = 'webp'
-        else:
-            ext = 'jpg'
-        nombre = re.sub(r'[^a-z0-9]', '-', slug.lower())[:50] + f'.{ext}'
+
+        # Detectar tipo de imagen
+        content_type = img_res.headers.get('Content-Type', '').split(';')[0].strip()
+        if not content_type or 'image' not in content_type:
+            content_type = 'image/jpeg'
+        ext = 'jpg' if 'jpeg' in content_type or 'jpg' in content_type or not content_type else \
+              'png' if 'png' in content_type else \
+              'webp' if 'webp' in content_type else 'jpg'
+
+        # Nombre de archivo desde la URL
+        nombre_desde_url = img_url.split('/')[-1].split('?')[0]
+        nombre = nombre_desde_url if nombre_desde_url.endswith(('jpg', 'jpeg', 'png', 'webp')) else f"imagen.{ext}"
+
+        print(f"⬆️  Subiendo a WordPress ({len(img_res.content)} bytes, {content_type})...")
         r = requests.post(
             f"{WORDPRESS_URL}/wp-json/wp/v2/media",
             headers={
@@ -187,15 +214,18 @@ def subir_imagen_wordpress(img_url, slug):
             },
             data=img_res.content,
             auth=(WORDPRESS_USER, WORDPRESS_APP_PASSWORD),
-            timeout=30
+            timeout=60
         )
+        print(f"   Respuesta WordPress media: {r.status_code}")
         if r.status_code == 201:
-            media_id = r.json()['id']
-            print(f"🖼️ Imagen subida (ID: {media_id})")
+            data = r.json()
+            media_id = data['id']
+            print(f"✅ Imagen subida OK — ID: {media_id}, URL: {data.get('source_url','')}")
             return media_id
-        print(f"⚠️ Error subiendo imagen: {r.status_code} — {r.text[:200]}")
+        else:
+            print(f"❌ Error subiendo imagen: {r.status_code}\n   {r.text[:400]}")
     except Exception as e:
-        print(f"⚠️ Error con imagen: {e}")
+        print(f"❌ Excepción subiendo imagen: {e}")
     return None
 
 def publicar_wordpress(titulo, cuerpo, media_id=None):
@@ -206,14 +236,20 @@ def publicar_wordpress(titulo, cuerpo, media_id=None):
     }
     if media_id:
         post['featured_media'] = media_id
+        print(f"🖼️  Asignando imagen destacada ID: {media_id}")
+    else:
+        print("ℹ️  Sin imagen destacada.")
+
     r = requests.post(
         f"{WORDPRESS_URL}/wp-json/wp/v2/posts",
         json=post,
         auth=(WORDPRESS_USER, WORDPRESS_APP_PASSWORD)
     )
+    print(f"   Respuesta WordPress post: {r.status_code}")
     if r.status_code == 201:
-        link = r.json().get('link', '')
-        print(f"✅ Borrador creado: {titulo}\n   {link}")
+        data = r.json()
+        print(f"✅ Borrador creado: {titulo}")
+        print(f"   ID post: {data['id']} — featured_media en respuesta: {data.get('featured_media', 'N/A')}")
     else:
         print(f"❌ Error: {r.status_code} — {r.text[:300]}")
 
@@ -232,25 +268,32 @@ def main():
         return
 
     for i, tema in enumerate(temas, 1):
-        print(f"\n--- Nota {i}: {tema['titulo_sugerido']} ---")
+        print(f"\n{'='*50}")
+        print(f"Nota {i}: {tema['titulo_sugerido']}")
+        print(f"Fuente: {tema.get('link','')}")
+        print('='*50)
 
-        # Obtener imagen desde la nota original
+        # 1. Descargar artículo original
+        og_image, texto_fuente = obtener_articulo_completo(tema['link'])
+
+        if not texto_fuente:
+            print("⚠️ No se pudo obtener el texto del artículo. Usando solo el título.")
+            texto_fuente = tema.get('titulo_original', tema['titulo_sugerido'])
+
+        # 2. Subir imagen
         media_id = None
-        if tema.get('link'):
-            img_url = obtener_og_image(tema['link'])
-            if img_url:
-                media_id = subir_imagen_wordpress(img_url, tema['titulo_sugerido'])
-            else:
-                print("ℹ️ Sin og:image en el artículo original.")
+        if og_image:
+            media_id = subir_imagen_wordpress(og_image)
 
-        texto_ia = generar_articulo(tema, fecha_hoy)
+        # 3. Generar nota con el texto real
+        texto_ia = generar_articulo(tema['titulo_sugerido'], texto_fuente)
         if not texto_ia:
             print("❌ Falló generación. Saltando.")
             continue
 
-        # Limpiar respuesta
         cuerpo = texto_ia.replace('```html', '').replace('```', '').strip()
 
+        # 4. Publicar
         publicar_wordpress(tema['titulo_sugerido'], cuerpo, media_id)
         time.sleep(3)
 
