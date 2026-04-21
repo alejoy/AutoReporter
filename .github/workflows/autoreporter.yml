@@ -2,7 +2,7 @@ name: AutoReporter — Orquestador Diario
 
 on:
   schedule:
-    - cron: '0 12 * * *'   # 12:00 UTC = 09:00 AM Argentina
+    - cron: '0 10 * * *'   # 10:00 UTC = 07:00 AM Argentina (UTC-3)
   workflow_dispatch:
     inputs:
       dry_run:

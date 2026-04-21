@@ -5,6 +5,8 @@ import requests
 import config
 from utils.logger import get_logger
 
+SIGNOS_EMOJIS = "♈♉♊♋♌♍♎♏♐♑♒♓"
+
 DIAS_SEMANA = {
     "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles",
     "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo",
@@ -45,12 +47,15 @@ class HoroscopoAgent:
             self.log.info(f"[DRY-RUN] {titulo_final}")
             return [{"title": titulo_final, "status": "dry_run", "reason": "modo dry-run"}]
 
+        media_id = self._generar_imagen_placa(fecha, wp_client)
+
         if wp_client:
             post = wp_client.create_post(
                 title=titulo_final,
                 content=html_final,
                 category_id=category_id,
-                status="draft",
+                featured_media=media_id,
+                status="publish",
             )
             if post:
                 if dup_checker:
@@ -59,6 +64,43 @@ class HoroscopoAgent:
             return [{"title": titulo_final, "status": "error", "reason": "fallo WP"}]
 
         return [{"title": titulo_final, "status": "error", "reason": "sin wp_client"}]
+
+    def _generar_imagen_placa(self, fecha: str, wp_client) -> int | None:
+        """Genera imagen de portada del horóscopo con imgkit (opcional)."""
+        if not wp_client:
+            return None
+        try:
+            import imgkit
+            placa_html = f"""<div style="width:800px;padding:50px;box-sizing:border-box;font-family:Georgia,serif;
+background:linear-gradient(135deg,#1a0533 0%,#4a1580 50%,#764ba2 100%);
+color:#fff;border-radius:20px;text-align:center;">
+  <div style="font-size:3.5em;letter-spacing:6px;margin-bottom:10px;">{SIGNOS_EMOJIS}</div>
+  <div style="font-size:1em;text-transform:uppercase;letter-spacing:4px;opacity:0.7;margin-bottom:12px;">
+    Astrología Diaria
+  </div>
+  <div style="font-size:3em;font-weight:bold;line-height:1.2;margin-bottom:16px;">
+    Horóscopo del Día
+  </div>
+  <div style="font-size:1.3em;opacity:0.85;margin-bottom:30px;">{fecha}</div>
+  <div style="display:flex;justify-content:center;gap:18px;flex-wrap:wrap;font-size:2em;">
+    <span>♈</span><span>♉</span><span>♊</span><span>♋</span>
+    <span>♌</span><span>♍</span><span>♎</span><span>♏</span>
+    <span>♐</span><span>♑</span><span>♒</span><span>♓</span>
+  </div>
+  <div style="margin-top:30px;font-size:0.9em;opacity:0.5;letter-spacing:2px;">
+    ✨ Los astros inclinan, pero no obligan ✨
+  </div>
+</div>"""
+            img_bytes = imgkit.from_string(placa_html, False, options={
+                "format": "jpg", "width": 900, "disable-smart-width": "", "quality": 90,
+            })
+            if img_bytes:
+                return wp_client.upload_media_bytes(img_bytes, f"horoscopo-{int(time.time())}.jpg")
+        except ImportError:
+            self.log.warning("imgkit no instalado — sin imagen de portada.")
+        except Exception as e:
+            self.log.warning(f"Error generando placa horóscopo: {e}")
+        return None
 
     def _generar(self, fecha: str) -> str | None:
         prompt = f"""Actuá como una astróloga experta. Escribí el HORÓSCOPO para hoy: {fecha}.
