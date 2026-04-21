@@ -47,7 +47,11 @@ class HoroscopoAgent:
             self.log.info(f"[DRY-RUN] {titulo_final}")
             return [{"title": titulo_final, "status": "dry_run", "reason": "modo dry-run"}]
 
+        # Imagen destacada — obligatoria
         media_id = self._generar_imagen_placa(fecha, wp_client)
+        if not media_id:
+            self.log.warning("SKIP — no se pudo generar/subir imagen de portada.")
+            return [{"title": titulo_final, "status": "error", "reason": "sin imagen destacada"}]
 
         if wp_client:
             post = wp_client.create_post(

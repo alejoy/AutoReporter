@@ -62,8 +62,11 @@ class ClimaAgent:
             self.log.info(f"[DRY-RUN] {titulo}")
             return [{"title": titulo, "status": "dry_run", "reason": "modo dry-run"}]
 
-        # Imagen: intentar generar placa con imgkit (opcional)
+        # Imagen destacada — obligatoria
         media_id = self._generar_imagen_placa(clima, cielo_texto, icono, alertas, fecha, wp_client)
+        if not media_id:
+            self.log.warning("SKIP — no se pudo generar/subir imagen de placa.")
+            return [{"title": titulo, "status": "error", "reason": "sin imagen destacada"}]
 
         if wp_client:
             post = wp_client.create_post(

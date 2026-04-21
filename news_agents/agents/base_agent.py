@@ -119,13 +119,21 @@ class BaseNewsAgent(ABC):
 
         if dry_run:
             extracto = re.sub(r"<[^>]+>", "", html_nota)[:200]
-            self.log.info(f"[DRY-RUN] Título: {titulo}\nExtracto: {extracto}...")
+            tiene_imagen = "✓ imagen" if og_image else "✗ sin imagen"
+            self.log.info(f"[DRY-RUN] {tiene_imagen} | Título: {titulo}\nExtracto: {extracto}...")
             return {"title": titulo, "status": "dry_run", "reason": "modo dry-run"}
 
-        # Subir imagen
+        # Imagen destacada — obligatoria
+        if not og_image:
+            self.log.warning(f"SKIP — sin imagen destacada: {titulo[:60]}")
+            return {"title": titulo, "status": "error", "reason": "sin imagen destacada en el artículo fuente"}
+
         media_id = None
-        if og_image and wp_client:
+        if wp_client:
             media_id = wp_client.upload_media(og_image)
+        if not media_id:
+            self.log.warning(f"SKIP — no se pudo subir la imagen: {titulo[:60]}")
+            return {"title": titulo, "status": "error", "reason": "fallo al subir imagen destacada"}
 
         # Publicar
         if wp_client:
