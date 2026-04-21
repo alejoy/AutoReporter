@@ -43,8 +43,8 @@ RSS_FEEDS = {
     ],
     "ProvincialAgent": [
         "https://www.lmneuquen.com/rss/neuquen.xml",
-        "https://www.rionegro.com.ar/feed/",
         "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
+        "https://www.rionegro.com.ar/feed/",
     ],
     "MunicipalAgent": [
         "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
@@ -58,6 +58,15 @@ RSS_FEEDS = {
     ],
 }
 
+# --- Filtro de palabras clave por agente (None = sin filtro) ---
+# Si está definido, solo pasan los titulares que contengan al menos una de las palabras.
+RSS_REQUIRED_KEYWORDS = {
+    "ProvincialAgent": ["neuquén", "neuquen", "neuquino", "neuquina"],
+    "MunicipalAgent":  ["neuquén", "neuquen", "neuquino", "neuquina"],
+    "SociedadAgent":   ["neuquén", "neuquen", "neuquino", "neuquina"],
+    "NacionalAgent":   None,  # noticias nacionales: sin filtro geográfico
+}
+
 # --- Prompts por agente (contexto para selección y redacción) ---
 AGENT_PROMPTS = {
     "NacionalAgent": {
@@ -65,15 +74,30 @@ AGENT_PROMPTS = {
         "redaccion": "Sos un redactor periodístico para un portal de noticias de Argentina.",
     },
     "ProvincialAgent": {
-        "seleccion": "Elegí los 2 más relevantes para los neuquinos. Priorizá política provincial, economía, obras, salud o seguridad.",
+        "seleccion": (
+            "Elegí los 2 más relevantes EXCLUSIVAMENTE sobre la provincia de Neuquén: "
+            "política provincial, economía, obras, salud o seguridad. "
+            "DESCARTÁ cualquier noticia de Río Negro, Chubut, Bariloche, Cipolletti o cualquier otra provincia. "
+            "Si no hay noticias claras de Neuquén, devolvé una lista vacía []."
+        ),
         "redaccion": "Sos un redactor periodístico para un portal de noticias de la provincia de Neuquén, Argentina.",
     },
     "MunicipalAgent": {
-        "seleccion": "Elegí los 2 más relevantes para los vecinos de la ciudad de Neuquén capital. Priorizá servicios municipales, obras, transporte, seguridad o economía local.",
+        "seleccion": (
+            "Elegí los 2 más relevantes EXCLUSIVAMENTE sobre la ciudad de Neuquén capital: "
+            "servicios municipales, obras, transporte, seguridad o economía local. "
+            "DESCARTÁ cualquier noticia de otras ciudades o provincias (Río Negro, Chubut, Bariloche, Cipolletti, etc.). "
+            "Si no hay noticias claras de la ciudad de Neuquén capital, devolvé una lista vacía []."
+        ),
         "redaccion": "Sos un redactor periodístico para un portal de noticias de la ciudad de Neuquén capital.",
     },
     "SociedadAgent": {
-        "seleccion": "Elegí los 2 más relevantes en cuanto a interés humano y social: historias de personas, comunidad, educación, salud, cultura o fenómenos sociales. Descartá política pura y deportes.",
-        "redaccion": "Sos un redactor periodístico para un portal de noticias de interés social y humano.",
+        "seleccion": (
+            "Elegí los 2 más relevantes en cuanto a interés humano y social en Neuquén: "
+            "historias de personas, comunidad, educación, salud, cultura o fenómenos sociales. "
+            "Priorizá noticias de Neuquén provincia o capital. "
+            "Descartá política pura, deportes y noticias que no mencionen Neuquén."
+        ),
+        "redaccion": "Sos un redactor periodístico para un portal de noticias de interés social y humano de Neuquén.",
     },
 }

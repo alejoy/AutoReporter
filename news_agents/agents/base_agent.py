@@ -150,6 +150,8 @@ class BaseNewsAgent(ABC):
     def _fetch_rss(self) -> list[dict]:
         noticias = []
         headers = {"User-Agent": "Mozilla/5.0 (AutoReporter/2.0)"}
+        required_kw = config.RSS_REQUIRED_KEYWORDS.get(self.name)  # list or None
+
         for url in self.RSS_FEEDS:
             try:
                 self.log.info(f"RSS: {url}")
@@ -159,12 +161,18 @@ class BaseNewsAgent(ABC):
                 for item in root.findall(".//item")[:6]:
                     titulo = item.findtext("title", "").strip()
                     link = item.findtext("link", "").strip()
-                    if titulo and len(titulo) > 10 and link:
-                        noticias.append({"titulo": titulo, "link": link})
+                    if not titulo or len(titulo) <= 10 or not link:
+                        continue
+                    if required_kw:
+                        titulo_lower = titulo.lower()
+                        if not any(kw in titulo_lower for kw in required_kw):
+                            self.log.debug(f"Filtrado (no es Neuquén): {titulo[:60]}")
+                            continue
+                    noticias.append({"titulo": titulo, "link": link})
             except Exception as e:
                 self.log.warning(f"Error en {url}: {e}")
             time.sleep(0.4)
-        self.log.info(f"{len(noticias)} noticias obtenidas.")
+        self.log.info(f"{len(noticias)} noticias obtenidas (filtradas).")
         return noticias[:15]
 
     # ------------------------------------------------------------------ #
