@@ -1,0 +1,56 @@
+name: AutoReporter — Orquestador Diario
+
+on:
+  schedule:
+    - cron: '0 12 * * *'   # 12:00 UTC = 09:00 AM Argentina
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Ejecutar en modo dry-run (sin publicar)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+      agents:
+        description: 'Agentes a ejecutar (separados por espacio, vacío = todos)'
+        required: false
+        default: ''
+
+jobs:
+  run_autoreporter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: news_agents
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies (wkhtmltopdf para ClimaAgent)
+        run: sudo apt-get install -y wkhtmltopdf || true
+
+      - name: Install Python dependencies
+        run: |
+          pip install requests imgkit || pip install requests
+
+      - name: Run AutoReporter
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.agents }}" ]; then
+            ARGS="$ARGS --agents ${{ github.event.inputs.agents }}"
+          fi
+          python main.py $ARGS
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WORDPRESS_USER: ${{ secrets.WORDPRESS_USER }}
+          WORDPRESS_APP_PASSWORD: ${{ secrets.WORDPRESS_APP_PASSWORD }}
+          WORDPRESS_URL: ${{ secrets.WORDPRESS_URL }}

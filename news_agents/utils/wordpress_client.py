@@ -1,0 +1,183 @@
+import requests
+import time
+import re
+from utils.logger import get_logger
+
+log = get_logger("WordPressClient")
+
+
+class WordPressClient:
+    def __init__(self, url: str, user: str, password: str):
+        self.base = url.rstrip("/")
+        self.auth = (user, password)
+        self._categories: dict[str, int] = {}
+
+    # ------------------------------------------------------------------ #
+    #  Categorías                                                           #
+    # ------------------------------------------------------------------ #
+    def get_categories(self) -> dict[str, int]:
+        """Devuelve {nombre_categoria: id} obtenido de la API de WP."""
+        if self._categories:
+            return self._categories
+        try:
+            r = self._get("/wp-json/wp/v2/categories", params={"per_page": 100})
+            self._categories = {c["name"]: c["id"] for c in r}
+            log.info(f"Categorías cargadas: {list(self._categories.keys())}")
+        except Exception as e:
+            log.error(f"Error cargando categorías: {e}")
+        return self._categories
+
+    def get_category_id(self, name: str) -> int | None:
+        cats = self.get_categories()
+        cat_id = cats.get(name)
+        if cat_id is None:
+            log.warning(f"Categoría '{name}' no encontrada en WordPress.")
+        return cat_id
+
+    # ------------------------------------------------------------------ #
+    #  Posts recientes (para duplicate checker)                             #
+    # ------------------------------------------------------------------ #
+    def get_recent_posts(self, count: int = 100) -> list[dict]:
+        """Devuelve lista de {title, link} de los últimos N posts."""
+        posts = []
+        try:
+            data = self._get("/wp-json/wp/v2/posts", params={
+                "per_page": min(count, 100),
+                "status": "any",
+                "_fields": "id,title,link",
+            })
+            posts = [{"title": p["title"]["rendered"], "link": p["link"]} for p in data]
+            log.info(f"{len(posts)} posts recientes cargados desde WP.")
+        except Exception as e:
+            log.error(f"Error obteniendo posts recientes: {e}")
+        return posts
+
+    # ------------------------------------------------------------------ #
+    #  Media                                                               #
+    # ------------------------------------------------------------------ #
+    def upload_media(self, img_url: str) -> int | None:
+        """Descarga una imagen desde img_url y la sube a WP. Devuelve el media ID."""
+        try:
+            log.info(f"Descargando imagen: {img_url}")
+            headers = {"User-Agent": "Mozilla/5.0 (AutoReporter/2.0)"}
+            img_res = requests.get(img_url, headers=headers, timeout=15)
+            img_res.raise_for_status()
+
+            content_type = img_res.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+            ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+            ext = ext_map.get(content_type, "jpg")
+
+            # Usar nombre del archivo original si es posible
+            filename = img_url.split("/")[-1].split("?")[0]
+            if not any(filename.lower().endswith(e) for e in ("jpg", "jpeg", "png", "webp")):
+                filename = f"imagen-{int(time.time())}.{ext}"
+
+            log.info(f"Subiendo a WP media ({len(img_res.content)} bytes, {content_type})...")
+            r = self._post_raw(
+                "/wp-json/wp/v2/media",
+                data=img_res.content,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Type": content_type,
+                },
+            )
+            if r.status_code == 201:
+                media_id = r.json()["id"]
+                log.info(f"Imagen subida OK — media_id={media_id}")
+                return media_id
+            log.error(f"Error subiendo imagen: HTTP {r.status_code} — {r.text[:300]}")
+        except Exception as e:
+            log.error(f"Excepción subiendo imagen: {e}")
+        return None
+
+    def upload_media_bytes(self, img_bytes: bytes, filename: str = "imagen.jpg", content_type: str = "image/jpeg") -> int | None:
+        """Sube bytes de imagen directamente a WP."""
+        try:
+            r = self._post_raw(
+                "/wp-json/wp/v2/media",
+                data=img_bytes,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Type": content_type,
+                },
+            )
+            if r.status_code == 201:
+                media_id = r.json()["id"]
+                log.info(f"Imagen (bytes) subida OK — media_id={media_id}")
+                return media_id
+            log.error(f"Error subiendo imagen bytes: HTTP {r.status_code} — {r.text[:300]}")
+        except Exception as e:
+            log.error(f"Excepción subiendo imagen bytes: {e}")
+        return None
+
+    # ------------------------------------------------------------------ #
+    #  Posts                                                               #
+    # ------------------------------------------------------------------ #
+    def create_post(
+        self,
+        title: str,
+        content: str,
+        category_id: int | None = None,
+        featured_media: int | None = None,
+        status: str = "draft",
+        tags: list[int] | None = None,
+    ) -> dict | None:
+        payload: dict = {"title": title, "content": content, "status": status}
+        if category_id:
+            payload["categories"] = [category_id]
+        if featured_media:
+            payload["featured_media"] = featured_media
+        if tags:
+            payload["tags"] = tags
+
+        try:
+            r = self._post_json("/wp-json/wp/v2/posts", json=payload)
+            if r.status_code == 201:
+                data = r.json()
+                log.info(
+                    f"Post creado OK — id={data['id']}, "
+                    f"featured_media={data.get('featured_media','N/A')}, "
+                    f"status={status}"
+                )
+                return data
+            log.error(f"Error creando post: HTTP {r.status_code} — {r.text[:400]}")
+        except Exception as e:
+            log.error(f"Excepción creando post: {e}")
+        return None
+
+    # ------------------------------------------------------------------ #
+    #  HTTP helpers con retry                                              #
+    # ------------------------------------------------------------------ #
+    def _get(self, path: str, params: dict = None) -> list | dict:
+        url = self.base + path
+        for attempt in range(3):
+            try:
+                r = requests.get(url, params=params, auth=self.auth, timeout=15)
+                r.raise_for_status()
+                return r.json()
+            except Exception as e:
+                log.warning(f"GET {path} intento {attempt+1}/3 falló: {e}")
+                time.sleep(2 ** attempt)
+        raise RuntimeError(f"GET {path} falló después de 3 intentos.")
+
+    def _post_json(self, path: str, json: dict) -> requests.Response:
+        url = self.base + path
+        for attempt in range(3):
+            try:
+                r = requests.post(url, json=json, auth=self.auth, timeout=30)
+                return r
+            except Exception as e:
+                log.warning(f"POST JSON {path} intento {attempt+1}/3 falló: {e}")
+                time.sleep(2 ** attempt)
+        raise RuntimeError(f"POST {path} falló después de 3 intentos.")
+
+    def _post_raw(self, path: str, data: bytes, headers: dict) -> requests.Response:
+        url = self.base + path
+        for attempt in range(3):
+            try:
+                r = requests.post(url, data=data, headers=headers, auth=self.auth, timeout=60)
+                return r
+            except Exception as e:
+                log.warning(f"POST RAW {path} intento {attempt+1}/3 falló: {e}")
+                time.sleep(2 ** attempt)
+        raise RuntimeError(f"POST RAW {path} falló después de 3 intentos.")

@@ -1,0 +1,114 @@
+import re
+import time
+import requests
+
+import config
+from utils.logger import get_logger
+
+DIAS_SEMANA = {
+    "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles",
+    "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo",
+}
+MESES = {
+    "January": "Enero", "February": "Febrero", "March": "Marzo", "April": "Abril",
+    "May": "Mayo", "June": "Junio", "July": "Julio", "August": "Agosto",
+    "September": "Septiembre", "October": "Octubre", "November": "Noviembre", "December": "Diciembre",
+}
+
+
+class HoroscopoAgent:
+    CATEGORY_NAME = "Generales"
+
+    def __init__(self):
+        self.name = "HoroscopoAgent"
+        self.log = get_logger(self.name)
+
+    def run(self, wp_client, dup_checker, category_id: int | None, dry_run: bool = False) -> list[dict]:
+        from datetime import datetime
+        now = datetime.now()
+        fecha = f"{DIAS_SEMANA.get(now.strftime('%A'))} {now.strftime('%d')} de {MESES.get(now.strftime('%B'))} de {now.strftime('%Y')}"
+        titulo = f"Horóscopo del día: {fecha}"
+        self.log.info(f"=== HoroscopoAgent — {fecha} ===")
+
+        if dup_checker and dup_checker.is_duplicate(titulo):
+            self.log.info("SKIP — horóscopo de hoy ya publicado.")
+            return [{"title": titulo, "status": "skipped", "reason": "duplicado"}]
+
+        texto_ia = self._generar(fecha)
+        if not texto_ia:
+            return [{"title": titulo, "status": "error", "reason": "fallo generación IA"}]
+
+        titulo_final, cuerpo = self._limpiar(texto_ia, fecha)
+        html_final = self._wrap_html(cuerpo, fecha)
+
+        if dry_run:
+            self.log.info(f"[DRY-RUN] {titulo_final}")
+            return [{"title": titulo_final, "status": "dry_run", "reason": "modo dry-run"}]
+
+        if wp_client:
+            post = wp_client.create_post(
+                title=titulo_final,
+                content=html_final,
+                category_id=category_id,
+                status="draft",
+            )
+            if post:
+                if dup_checker:
+                    dup_checker.mark_published(titulo_final)
+                return [{"title": titulo_final, "status": "published", "reason": f"post_id={post['id']}"}]
+            return [{"title": titulo_final, "status": "error", "reason": "fallo WP"}]
+
+        return [{"title": titulo_final, "status": "error", "reason": "sin wp_client"}]
+
+    def _generar(self, fecha: str) -> str | None:
+        prompt = f"""Actuá como una astróloga experta. Escribí el HORÓSCOPO para hoy: {fecha}.
+
+REGLAS (HTML):
+1. NO saludes. Empezá DIRECTO con <h2> para "Energía Cósmica de Hoy" (breve resumen planetario).
+2. Luego un bloque por cada signo: <h3> con el nombre y emoji del signo, <p> con la predicción.
+   Orden: Aries ♈, Tauro ♉, Géminis ♊, Cáncer ♋, Leo ♌, Virgo ♍, Libra ♎, Escorpio ♏, Sagitario ♐, Capricornio ♑, Acuario ♒, Piscis ♓.
+3. Tono: místico, inspirador y útil. Español neutro.
+4. SOLO HTML, sin markdown."""
+        for modelo in config.GEMINI_MODELS:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{modelo}:generateContent?key={config.GEMINI_API_KEY}"
+            )
+            try:
+                self.log.info(f"Gemini [{modelo}]...")
+                res = requests.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 2500},
+                    },
+                    timeout=30,
+                )
+                if res.status_code == 200:
+                    return res.json()["candidates"][0]["content"]["parts"][0]["text"]
+                self.log.warning(f"HTTP {res.status_code}")
+            except Exception as e:
+                self.log.warning(f"Error: {e}")
+            time.sleep(1)
+        return None
+
+    @staticmethod
+    def _limpiar(texto: str, fecha: str) -> tuple[str, str]:
+        texto = texto.replace("```html", "").replace("```", "").strip()
+        titulo = f"Horóscopo del día: {fecha}"
+        return titulo, texto
+
+    @staticmethod
+    def _wrap_html(cuerpo: str, fecha: str) -> str:
+        return f"""<div style="font-family: 'Georgia', serif; font-size: 18px; line-height: 1.7; color: #2c3e50; max-width: 800px; margin: auto;">
+  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 35px; border-radius: 15px; text-align: center; margin-bottom: 30px;">
+    <p style="text-transform: uppercase; letter-spacing: 2px; font-size: 13px; margin: 0; opacity: 0.8;">Astrología Diaria</p>
+    <h2 style="font-size: 30px; margin: 8px 0; font-family: sans-serif;">Los Astros Hoy</h2>
+    <div style="font-size: 17px; opacity: 0.75;">{fecha}</div>
+  </div>
+  <div>{cuerpo}</div>
+  <div style="margin-top: 35px; padding: 18px; background: #f8f9fa; border-left: 4px solid #764ba2; font-size: 14px; color: #666; text-align: center;">
+    ✨ <em>"Los astros inclinan, pero no obligan."</em> ✨
+  </div>
+</div>"""
