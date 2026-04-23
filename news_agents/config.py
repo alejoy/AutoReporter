@@ -42,19 +42,19 @@ RSS_FEEDS = {
         "https://www.lmneuquen.com/rss/pais.xml",
     ],
     "ProvincialAgent": [
+        # Sección provincial de LM Neuquén (política provincial, gobernación, legislatura)
         "https://www.lmneuquen.com/rss/neuquen.xml",
-        "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
+        # Río Negro cubre Neuquén provincia — filtrado por keyword
         "https://www.rionegro.com.ar/feed/",
     ],
     "MunicipalAgent": [
+        # Últimas noticias y home de LM Neuquén (más enfocado en ciudad)
         "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
         "https://www.lmneuquen.com/rss/home.xml",
-        "https://www.rionegro.com.ar/feed/",
     ],
     "SociedadAgent": [
         "https://www.perfil.com/feed",
         "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
-        "https://www.rionegro.com.ar/feed/",
     ],
 }
 

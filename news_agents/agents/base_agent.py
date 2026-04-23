@@ -142,7 +142,7 @@ class BaseNewsAgent(ABC):
                 content=html_nota,
                 category_id=category_id,
                 featured_media=media_id,
-                status="draft",
+                status="publish",
             )
             if post:
                 if dup_checker:

@@ -110,6 +110,13 @@ class ClimaAgent:
             self.log.error(f"Error Open-Meteo: {e}")
             return None
 
+    # Zonas del SMN que pertenecen a la provincia de Neuquén
+    _NEUQUEN_SMN_ZONES = {
+        "confluencia", "zapala", "chos malal", "añelo", "pehuenia",
+        "loncopué", "picunches", "ñorquín", "minas", "neuquén norte",
+        "neuquén sur", "neuquén centro", "neuquén",
+    }
+
     def _obtener_alertas(self) -> list[dict]:
         alertas = []
         try:
@@ -118,13 +125,28 @@ class ClimaAgent:
                 headers={"User-Agent": "Mozilla/5.0"}, timeout=5,
             )
             for a in res.json():
-                txt = json.dumps(a, ensure_ascii=False)
-                if "Confluencia" in txt or ("Neuquén" in txt and "Cordillera" not in txt):
-                    alertas.append({"titulo": a["title"], "nivel": a["severity"]})
+                if self._es_alerta_neuquen(a):
+                    alertas.append({"titulo": a.get("title", ""), "nivel": a.get("severity", "")})
         except Exception:
             pass
-        self.log.info(f"{len(alertas)} alertas SMN.")
+        self.log.info(f"{len(alertas)} alertas SMN para Neuquén.")
         return alertas
+
+    def _es_alerta_neuquen(self, a: dict) -> bool:
+        """Retorna True solo si la alerta aplica a la provincia de Neuquén."""
+        # Revisar campos estructurados de zonas/provincias primero
+        for key in ("zones", "zone", "areas", "area", "provinces", "province"):
+            val = a.get(key, "")
+            if isinstance(val, (list, tuple)):
+                val = " ".join(str(v) for v in val)
+            elif isinstance(val, dict):
+                val = json.dumps(val, ensure_ascii=False)
+            val_lower = str(val).lower()
+            if any(zona in val_lower for zona in self._NEUQUEN_SMN_ZONES):
+                return True
+        # Fallback: el título menciona explícitamente Neuquén
+        titulo = str(a.get("title", "")).lower()
+        return "neuquén" in titulo or "confluencia" in titulo
 
     def _generar_titulo(self, clima, cielo_texto, alertas, fecha) -> str:
         if alertas:
