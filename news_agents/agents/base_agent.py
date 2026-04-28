@@ -227,6 +227,7 @@ class BaseNewsAgent(ABC):
     #  Selección de temas con Gemini                                        #
     # ------------------------------------------------------------------ #
     def _select_topics(self, noticias: list[dict], fecha_hoy: str) -> list[dict] | None:
+        max_topics = config.AGENT_MAX_TOPICS.get(self.name, 2)
         titulares = "\n".join([f"{i}. {n['titulo']}" for i, n in enumerate(noticias)])
         prompt = f"""Titulares del {fecha_hoy}:
 
@@ -234,12 +235,12 @@ class BaseNewsAgent(ABC):
 
 {self.SELECTION_CONTEXT}
 
-Respondé SOLO con JSON válido, sin texto adicional:
+Seleccioná como máximo {max_topics} titulares. Respondé SOLO con JSON válido, sin texto adicional:
 [
   {{"indice": 0, "titulo_sugerido": "Título periodístico"}},
   {{"indice": 1, "titulo_sugerido": "..."}}
 ]"""
-        respuesta = self._call_gemini(prompt, max_tokens=200)
+        respuesta = self._call_gemini(prompt, max_tokens=300)
         if not respuesta:
             return None
         try:

@@ -63,40 +63,59 @@ RSS_FEEDS = {
 RSS_REQUIRED_KEYWORDS = {
     "ProvincialAgent": ["neuquén", "neuquen", "neuquino", "neuquina"],
     "MunicipalAgent":  ["neuquén", "neuquen", "neuquino", "neuquina"],
-    "SociedadAgent":   ["neuquén", "neuquen", "neuquino", "neuquina"],
-    "NacionalAgent":   None,  # noticias nacionales: sin filtro geográfico
+    "SociedadAgent":   None,  # Sociedad acepta también interés humano nacional
+    "NacionalAgent":   None,
 }
+
+# --- Candidatos máximos por agente (cuántos temas selecciona Gemini por ejecución) ---
+AGENT_MAX_TOPICS = {
+    "MunicipalAgent":  3,
+    "ProvincialAgent": 3,
+    "NacionalAgent":   3,
+    "SociedadAgent":   2,
+}
+
+# Frase antispam que se inyecta en todos los prompts de selección
+_ANTISPAM = (
+    "DESCARTÁ siempre: contenido claramente publicitario, notas de prensa de marcas "
+    "comerciales, gacetillas institucionales o artículos patrocinados. "
+    "Si el mismo tema aparece en varios titulares, elegí solo el más completo."
+)
 
 # --- Prompts por agente (contexto para selección y redacción) ---
 AGENT_PROMPTS = {
     "NacionalAgent": {
-        "seleccion": "Elegí los 2 más importantes del día para los argentinos. Priorizá política nacional, economía, justicia o seguridad. Descartá farándula y deportes si hay temas más relevantes.",
+        "seleccion": (
+            f"Elegí los 3 más importantes del día para los argentinos. "
+            "Priorizá política nacional, economía, justicia o seguridad. "
+            f"Descartá farándula y deportes si hay temas más relevantes. {_ANTISPAM}"
+        ),
         "redaccion": "Sos un redactor periodístico para un portal de noticias de Argentina.",
     },
     "ProvincialAgent": {
         "seleccion": (
-            "Elegí los 2 más relevantes EXCLUSIVAMENTE sobre la provincia de Neuquén: "
+            "Elegí los 3 más relevantes EXCLUSIVAMENTE sobre la provincia de Neuquén: "
             "política provincial, economía, obras, salud o seguridad. "
             "DESCARTÁ cualquier noticia de Río Negro, Chubut, Bariloche, Cipolletti o cualquier otra provincia. "
-            "Si no hay noticias claras de Neuquén, devolvé una lista vacía []."
+            f"Si no hay 3 noticias claras de Neuquén, devolvé las que haya (puede ser menos). {_ANTISPAM}"
         ),
         "redaccion": "Sos un redactor periodístico para un portal de noticias de la provincia de Neuquén, Argentina.",
     },
     "MunicipalAgent": {
         "seleccion": (
-            "Elegí los 2 más relevantes EXCLUSIVAMENTE sobre la ciudad de Neuquén capital: "
+            "Elegí los 3 más relevantes EXCLUSIVAMENTE sobre la ciudad de Neuquén capital: "
             "servicios municipales, obras, transporte, seguridad o economía local. "
             "DESCARTÁ cualquier noticia de otras ciudades o provincias (Río Negro, Chubut, Bariloche, Cipolletti, etc.). "
-            "Si no hay noticias claras de la ciudad de Neuquén capital, devolvé una lista vacía []."
+            f"Si no hay 3 noticias claras de la ciudad de Neuquén capital, devolvé las que haya. {_ANTISPAM}"
         ),
         "redaccion": "Sos un redactor periodístico para un portal de noticias de la ciudad de Neuquén capital.",
     },
     "SociedadAgent": {
         "seleccion": (
-            "Elegí los 2 más relevantes en cuanto a interés humano y social en Neuquén: "
+            "Elegí los 2 más relevantes de interés humano y social: "
             "historias de personas, comunidad, educación, salud, cultura o fenómenos sociales. "
-            "Priorizá noticias de Neuquén provincia o capital. "
-            "Descartá política pura, deportes y noticias que no mencionen Neuquén."
+            "Priorizá noticias de Neuquén, pero si no hay suficientes también podés incluir "
+            f"historias nacionales de alto impacto social. Descartá política pura y deportes. {_ANTISPAM}"
         ),
         "redaccion": "Sos un redactor periodístico para un portal de noticias de interés social y humano de Neuquén.",
     },
