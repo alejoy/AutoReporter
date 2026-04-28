@@ -55,59 +55,85 @@ class WordPressClient:
     # ------------------------------------------------------------------ #
     #  Media                                                               #
     # ------------------------------------------------------------------ #
-    def upload_media(self, img_url: str) -> int | None:
-        """Descarga una imagen desde img_url y la sube a WP. Devuelve el media ID."""
-        try:
-            log.info(f"Descargando imagen: {img_url}")
-            headers = {"User-Agent": "Mozilla/5.0 (AutoReporter/2.0)"}
-            img_res = requests.get(img_url, headers=headers, timeout=15)
-            img_res.raise_for_status()
+    def upload_media(self, img_url: str, max_attempts: int = 3) -> int | None:
+        """
+        Descarga una imagen desde img_url y la sube a WP.
+        Reintenta el ciclo completo (descarga + subida) hasta max_attempts veces.
+        Devuelve el media ID o None si todos los intentos fallan.
+        """
+        headers_dl = {"User-Agent": "Mozilla/5.0 (AutoReporter/2.0)"}
+        for attempt in range(1, max_attempts + 1):
+            try:
+                log.info(f"Descargando imagen (intento {attempt}/{max_attempts}): {img_url}")
+                img_res = requests.get(img_url, headers=headers_dl, timeout=20)
+                img_res.raise_for_status()
 
-            content_type = img_res.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-            ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-            ext = ext_map.get(content_type, "jpg")
+                content_type = img_res.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+                ext = ext_map.get(content_type, "jpg")
 
-            # Usar nombre del archivo original si es posible
-            filename = img_url.split("/")[-1].split("?")[0]
-            if not any(filename.lower().endswith(e) for e in ("jpg", "jpeg", "png", "webp")):
-                filename = f"imagen-{int(time.time())}.{ext}"
+                filename = img_url.split("/")[-1].split("?")[0]
+                if not any(filename.lower().endswith(e) for e in ("jpg", "jpeg", "png", "webp")):
+                    filename = f"imagen-{int(time.time())}.{ext}"
 
-            log.info(f"Subiendo a WP media ({len(img_res.content)} bytes, {content_type})...")
-            r = self._post_raw(
-                "/wp-json/wp/v2/media",
-                data=img_res.content,
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "Content-Type": content_type,
-                },
-            )
-            if r.status_code == 201:
-                media_id = r.json()["id"]
-                log.info(f"Imagen subida OK — media_id={media_id}")
-                return media_id
-            log.error(f"Error subiendo imagen: HTTP {r.status_code} — {r.text[:300]}")
-        except Exception as e:
-            log.error(f"Excepción subiendo imagen: {e}")
+                log.info(f"Subiendo a WP media ({len(img_res.content)} bytes)...")
+                r = self._post_raw(
+                    "/wp-json/wp/v2/media",
+                    data=img_res.content,
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{filename}"',
+                        "Content-Type": content_type,
+                    },
+                )
+                if r.status_code == 201:
+                    media_id = r.json()["id"]
+                    log.info(f"Imagen subida OK — media_id={media_id}")
+                    return media_id
+                # HTTP 5xx → reintentar; HTTP 4xx → error permanente
+                log.warning(f"WP media HTTP {r.status_code} — {r.text[:200]}")
+                if r.status_code < 500:
+                    break
+            except Exception as e:
+                log.warning(f"Excepción subiendo imagen intento {attempt}: {e}")
+
+            if attempt < max_attempts:
+                wait = 2 ** attempt
+                log.info(f"Reintentando imagen en {wait}s...")
+                time.sleep(wait)
+
+        log.error(f"No se pudo subir imagen tras {max_attempts} intentos: {img_url}")
         return None
 
-    def upload_media_bytes(self, img_bytes: bytes, filename: str = "imagen.jpg", content_type: str = "image/jpeg") -> int | None:
-        """Sube bytes de imagen directamente a WP."""
-        try:
-            r = self._post_raw(
-                "/wp-json/wp/v2/media",
-                data=img_bytes,
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "Content-Type": content_type,
-                },
-            )
-            if r.status_code == 201:
-                media_id = r.json()["id"]
-                log.info(f"Imagen (bytes) subida OK — media_id={media_id}")
-                return media_id
-            log.error(f"Error subiendo imagen bytes: HTTP {r.status_code} — {r.text[:300]}")
-        except Exception as e:
-            log.error(f"Excepción subiendo imagen bytes: {e}")
+    def upload_media_bytes(self, img_bytes: bytes, filename: str = "imagen.jpg",
+                           content_type: str = "image/jpeg", max_attempts: int = 3) -> int | None:
+        """Sube bytes de imagen directamente a WP, con reintentos."""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                log.info(f"Subiendo imagen bytes a WP (intento {attempt}/{max_attempts})...")
+                r = self._post_raw(
+                    "/wp-json/wp/v2/media",
+                    data=img_bytes,
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{filename}"',
+                        "Content-Type": content_type,
+                    },
+                )
+                if r.status_code == 201:
+                    media_id = r.json()["id"]
+                    log.info(f"Imagen (bytes) subida OK — media_id={media_id}")
+                    return media_id
+                log.warning(f"WP media bytes HTTP {r.status_code} — {r.text[:200]}")
+                if r.status_code < 500:
+                    break
+            except Exception as e:
+                log.warning(f"Excepción subiendo imagen bytes intento {attempt}: {e}")
+
+            if attempt < max_attempts:
+                wait = 2 ** attempt
+                log.info(f"Reintentando en {wait}s...")
+                time.sleep(wait)
+
+        log.error(f"No se pudo subir imagen (bytes) tras {max_attempts} intentos.")
         return None
 
     # ------------------------------------------------------------------ #
@@ -176,8 +202,11 @@ class WordPressClient:
         for attempt in range(3):
             try:
                 r = requests.post(url, data=data, headers=headers, auth=self.auth, timeout=60)
-                return r
+                # Reintentar solo en 5xx (errores de servidor transitorios)
+                if r.status_code < 500:
+                    return r
+                log.warning(f"POST RAW {path} HTTP {r.status_code} intento {attempt+1}/3")
             except Exception as e:
                 log.warning(f"POST RAW {path} intento {attempt+1}/3 falló: {e}")
-                time.sleep(2 ** attempt)
+            time.sleep(2 ** attempt)
         raise RuntimeError(f"POST RAW {path} falló después de 3 intentos.")
