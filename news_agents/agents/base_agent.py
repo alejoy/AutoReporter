@@ -5,6 +5,7 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from abc import ABC, abstractmethod
+from html import unescape as html_unescape
 
 import config
 from utils.logger import get_logger
@@ -197,16 +198,18 @@ class BaseNewsAgent(ABC):
             res.raise_for_status()
             html = res.text
 
-            # og:image
+            # og:image — decodificar entidades HTML (&amp; → &, etc.)
             for patron in [
                 r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
                 r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
             ]:
                 m = re.search(patron, html, re.IGNORECASE)
-                if m and m.group(1).startswith("http"):
-                    og_image = m.group(1)
-                    self.log.info(f"og:image: {og_image}")
-                    break
+                if m:
+                    candidate = html_unescape(m.group(1))
+                    if candidate.startswith("http"):
+                        og_image = candidate
+                        self.log.info(f"og:image: {og_image}")
+                        break
 
             if not og_image:
                 self.log.warning("Sin og:image en el artículo.")

@@ -38,6 +38,7 @@ AGENT_CATEGORY_MAP = {
 RSS_FEEDS = {
     "NacionalAgent": [
         "https://www.lanacion.com.ar/arc/outboundfeeds/rss/",
+        "https://www.infobae.com/feeds/rss/",
         "https://www.perfil.com/feed",
         "https://www.lmneuquen.com/rss/pais.xml",
     ],
@@ -48,9 +49,10 @@ RSS_FEEDS = {
         "https://www.rionegro.com.ar/feed/",
     ],
     "MunicipalAgent": [
-        # Últimas noticias y home de LM Neuquén (más enfocado en ciudad)
         "https://www.lmneuquen.com/rss/ultimas-noticias.xml",
-        "https://www.lmneuquen.com/rss/home.xml",
+        "https://www.lmneuquen.com/rss/neuquen.xml",
+        # Río Negro cubre Neuquén capital — keyword filter activo
+        "https://www.rionegro.com.ar/feed/",
     ],
     "SociedadAgent": [
         "https://www.perfil.com/feed",
@@ -79,7 +81,8 @@ AGENT_MAX_TOPICS = {
 _ANTISPAM = (
     "DESCARTÁ siempre: contenido claramente publicitario, notas de prensa de marcas "
     "comerciales, gacetillas institucionales o artículos patrocinados. "
-    "Si el mismo tema aparece en varios titulares, elegí solo el más completo."
+    "Elegí temas DISTINTOS entre sí: si varios titulares tratan el mismo evento o fenómeno "
+    "(aunque desde ángulos diferentes), contá solo como uno y elegí el más completo."
 )
 
 # --- Prompts por agente (contexto para selección y redacción) ---
