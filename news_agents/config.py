@@ -77,10 +77,17 @@ AGENT_MAX_TOPICS = {
     "SociedadAgent":   2,
 }
 
+# Palabras en el titular RSS que indican artículos con contenido dinámico/incompleto
+RSS_SKIP_KEYWORDS = [
+    "minuto a minuto", "en vivo", "sigue la sesión", "cobertura en vivo",
+    "seguí en vivo", "tiempo real", "actualización en vivo",
+]
+
 # Frase antispam que se inyecta en todos los prompts de selección
 _ANTISPAM = (
     "DESCARTÁ siempre: contenido claramente publicitario, notas de prensa de marcas "
     "comerciales, gacetillas institucionales o artículos patrocinados. "
+    "DESCARTÁ artículos de tipo 'minuto a minuto', 'en vivo' o cobertura en tiempo real. "
     "Elegí temas DISTINTOS entre sí: si varios titulares tratan el mismo evento o fenómeno "
     "(aunque desde ángulos diferentes), contá solo como uno y elegí el más completo."
 )

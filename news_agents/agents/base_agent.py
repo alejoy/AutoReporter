@@ -118,6 +118,11 @@ class BaseNewsAgent(ABC):
 
         html_nota = html_nota.replace("```html", "").replace("```", "").strip()
 
+        # Validar que Gemini generó una nota real y no un mensaje de rechazo
+        if self._es_rechazo_ia(html_nota):
+            self.log.warning(f"SKIP — IA no pudo generar nota válida: {titulo[:60]}")
+            return {"title": titulo, "status": "error", "reason": "contenido fuente inválido (IA rechazó)"}
+
         if dry_run:
             extracto = re.sub(r"<[^>]+>", "", html_nota)[:200]
             tiene_imagen = "✓ imagen" if og_image else "✗ sin imagen"
@@ -160,6 +165,7 @@ class BaseNewsAgent(ABC):
         noticias = []
         headers = {"User-Agent": "Mozilla/5.0 (AutoReporter/2.0)"}
         required_kw = config.RSS_REQUIRED_KEYWORDS.get(self.name)  # list or None
+        skip_kw = config.RSS_SKIP_KEYWORDS  # artículos dinámicos/en vivo
 
         for url in self.RSS_FEEDS:
             try:
@@ -172,11 +178,15 @@ class BaseNewsAgent(ABC):
                     link = item.findtext("link", "").strip()
                     if not titulo or len(titulo) <= 10 or not link:
                         continue
-                    if required_kw:
-                        titulo_lower = titulo.lower()
-                        if not any(kw in titulo_lower for kw in required_kw):
-                            self.log.debug(f"Filtrado (no es Neuquén): {titulo[:60]}")
-                            continue
+                    titulo_lower = titulo.lower()
+                    # Excluir artículos de cobertura dinámica (minuto a minuto, en vivo)
+                    if any(kw in titulo_lower for kw in skip_kw):
+                        self.log.debug(f"Filtrado (contenido dinámico): {titulo[:60]}")
+                        continue
+                    # Filtro geográfico por agente
+                    if required_kw and not any(kw in titulo_lower for kw in required_kw):
+                        self.log.debug(f"Filtrado (no es Neuquén): {titulo[:60]}")
+                        continue
                     noticias.append({"titulo": titulo, "link": link})
             except Exception as e:
                 self.log.warning(f"Error en {url}: {e}")
@@ -214,12 +224,15 @@ class BaseNewsAgent(ABC):
             if not og_image:
                 self.log.warning("Sin og:image en el artículo.")
 
-            # Texto del artículo
+            # Texto del artículo — solo párrafos con contenido periodístico real
             parrafos = re.findall(r"<p[^>]*>(.*?)</p>", html, re.DOTALL | re.IGNORECASE)
             limpios = [self._strip_html(p) for p in parrafos]
-            limpios = [t for t in limpios if len(t) > 60]
+            limpios = [t for t in limpios if self._es_parrafo_noticia(t)]
             texto = "\n\n".join(limpios[:20])
-            self.log.info(f"Texto extraído: {len(texto)} caracteres.")
+            if texto:
+                self.log.info(f"Texto extraído: {len(texto)} caracteres ({len(limpios)} párrafos).")
+            else:
+                self.log.warning("Texto extraído vacío o solo código — posible artículo dinámico.")
 
         except Exception as e:
             self.log.warning(f"Error descargando artículo {url}: {e}")
@@ -319,3 +332,39 @@ Seleccioná como máximo {max_topics} titulares. Respondé SOLO con JSON válido
     def _strip_html(texto: str) -> str:
         texto = re.sub(r"<[^>]+>", "", texto or "")
         return re.sub(r"\s+", " ", texto).strip()
+
+    @staticmethod
+    def _es_parrafo_noticia(texto: str) -> bool:
+        """Devuelve True si el texto parece prosa periodística, no código CSS/JS."""
+        if len(texto) < 60:
+            return False
+        # Rechazar párrafos con alta densidad de caracteres de código
+        code_chars = texto.count("{") + texto.count("}") + texto.count(";")
+        if code_chars / max(len(texto), 1) > 0.02:
+            return False
+        # Rechazar si tiene poca proporción de letras (código tiene muchos símbolos)
+        alpha = sum(c.isalpha() or c.isspace() for c in texto) / len(texto)
+        return alpha > 0.65
+
+    # Frases que indican que Gemini no pudo generar una nota real
+    _REFUSAL_SIGNALS = (
+        "no es posible redactar",
+        "no es posible generar",
+        "no puedo redactar",
+        "no puedo generar",
+        "definiciones de propiedades css",
+        "propiedades css",
+        "sin contenido periodístico",
+        "no contiene información periodística",
+        "el texto fuente no contiene",
+        "texto fuente consiste en",
+        "texto fuente proporcionado consiste",
+        "no hay hechos",
+        "no se puede redactar",
+    )
+
+    @classmethod
+    def _es_rechazo_ia(cls, html_nota: str) -> bool:
+        """Devuelve True si Gemini devolvió un mensaje de rechazo en lugar de una nota."""
+        texto_plano = re.sub(r"<[^>]+>", "", html_nota).lower()
+        return any(signal in texto_plano for signal in cls._REFUSAL_SIGNALS)
