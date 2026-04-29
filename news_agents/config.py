@@ -27,7 +27,7 @@ AGENTS_ENABLED = {
 # --- Categorías WordPress (nombre exacto → ID se obtiene de la API al arrancar) ---
 AGENT_CATEGORY_MAP = {
     "MunicipalAgent":  "MUNICIPALES",
-    "ProvincialAgent": "PROVINCIAL",
+    "ProvincialAgent": "PROVINCIA",
     "NacionalAgent":   "Nacional",
     "SociedadAgent":   "SOCIEDAD",
     "HoroscopoAgent":  "Generales",
