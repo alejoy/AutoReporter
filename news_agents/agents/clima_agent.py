@@ -151,7 +151,8 @@ class ClimaAgent:
     def _generar_titulo(self, clima, cielo_texto, alertas, fecha) -> str:
         if alertas:
             return f"⚠️ Alerta meteorológica en Neuquén: {alertas[0]['titulo']}"
-        return f"Clima en Neuquén: se espera una máxima de {clima['temp_max']}°C y cielo {cielo_texto.lower()}"
+        # Incluir la fecha para que cada día sea único y no se detecte como duplicado
+        return f"Clima en Neuquén del {fecha}: máxima de {clima['temp_max']}°C y cielo {cielo_texto.lower()}"
 
     def _generar_redaccion(self, clima, cielo_texto, alertas, fecha, icono) -> str | None:
         datos = {
