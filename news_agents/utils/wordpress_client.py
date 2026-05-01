@@ -69,11 +69,15 @@ class WordPressClient:
                 img_res.raise_for_status()
 
                 content_type = img_res.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-                ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+                ext_map = {
+                    "image/jpeg": "jpg", "image/png": "png",
+                    "image/webp": "webp", "image/avif": "avif", "image/gif": "gif",
+                }
                 ext = ext_map.get(content_type, "jpg")
+                allowed_exts = ("jpg", "jpeg", "png", "webp", "avif", "gif")
 
                 filename = img_url.split("/")[-1].split("?")[0]
-                if not any(filename.lower().endswith(e) for e in ("jpg", "jpeg", "png", "webp")):
+                if not any(filename.lower().endswith(e) for e in allowed_exts):
                     filename = f"imagen-{int(time.time())}.{ext}"
 
                 log.info(f"Subiendo a WP media ({len(img_res.content)} bytes)...")
