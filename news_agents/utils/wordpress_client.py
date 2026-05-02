@@ -178,28 +178,53 @@ class WordPressClient:
     # ------------------------------------------------------------------ #
     #  HTTP helpers con retry                                              #
     # ------------------------------------------------------------------ #
+    # Delays en segundos entre reintentos según tipo de error
+    # Errores de red (conexión rechazada, host inalcanzable) → esperar más
+    _NETWORK_ERRORS = (
+        "Failed to establish a new connection",
+        "Network is unreachable",
+        "Connection refused",
+        "Name or service not known",
+        "Max retries exceeded",
+    )
+    _RETRY_DELAYS_NETWORK = [15, 30, 60, 120]   # ~4 min total
+    _RETRY_DELAYS_DEFAULT = [2, 5, 10, 20]       # ~37s total
+
     def _get(self, path: str, params: dict = None) -> list | dict:
         url = self.base + path
-        for attempt in range(3):
+        max_attempts = 5
+        for attempt in range(max_attempts):
             try:
-                r = requests.get(url, params=params, auth=self.auth, timeout=15)
+                r = requests.get(url, params=params, auth=self.auth, timeout=20)
                 r.raise_for_status()
                 return r.json()
             except Exception as e:
-                log.warning(f"GET {path} intento {attempt+1}/3 falló: {e}")
-                time.sleep(2 ** attempt)
-        raise RuntimeError(f"GET {path} falló después de 3 intentos.")
+                err_str = str(e)
+                is_network = any(kw in err_str for kw in self._NETWORK_ERRORS)
+                delays = self._RETRY_DELAYS_NETWORK if is_network else self._RETRY_DELAYS_DEFAULT
+                log.warning(f"GET {path} intento {attempt+1}/{max_attempts} falló: {err_str[:120]}")
+                if attempt < max_attempts - 1:
+                    wait = delays[min(attempt, len(delays) - 1)]
+                    log.info(f"Esperando {wait}s antes de reintentar...")
+                    time.sleep(wait)
+        raise RuntimeError(f"GET {path} falló después de {max_attempts} intentos.")
 
     def _post_json(self, path: str, json: dict) -> requests.Response:
         url = self.base + path
-        for attempt in range(3):
+        max_attempts = 4
+        for attempt in range(max_attempts):
             try:
                 r = requests.post(url, json=json, auth=self.auth, timeout=30)
                 return r
             except Exception as e:
-                log.warning(f"POST JSON {path} intento {attempt+1}/3 falló: {e}")
-                time.sleep(2 ** attempt)
-        raise RuntimeError(f"POST {path} falló después de 3 intentos.")
+                err_str = str(e)
+                is_network = any(kw in err_str for kw in self._NETWORK_ERRORS)
+                delays = self._RETRY_DELAYS_NETWORK if is_network else self._RETRY_DELAYS_DEFAULT
+                log.warning(f"POST JSON {path} intento {attempt+1}/{max_attempts} falló: {err_str[:120]}")
+                if attempt < max_attempts - 1:
+                    wait = delays[min(attempt, len(delays) - 1)]
+                    time.sleep(wait)
+        raise RuntimeError(f"POST {path} falló después de {max_attempts} intentos.")
 
     def _post_raw(self, path: str, data: bytes, headers: dict) -> requests.Response:
         url = self.base + path

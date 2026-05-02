@@ -19,6 +19,7 @@ on:
 jobs:
   run_autoreporter:
     runs-on: ubuntu-latest
+    timeout-minutes: 30      # margen para reintentos de red (default es 6h)
     defaults:
       run:
         working-directory: news_agents
