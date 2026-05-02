@@ -33,12 +33,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install system dependencies (wkhtmltopdf para ClimaAgent)
-        run: sudo apt-get install -y wkhtmltopdf || true
-
       - name: Install Python dependencies
-        run: |
-          pip install requests imgkit || pip install requests
+        run: pip install requests Pillow
 
       - name: Run AutoReporter
         run: |

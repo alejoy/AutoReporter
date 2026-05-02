@@ -200,48 +200,114 @@ ESTRUCTURA en HTML:
         return None
 
     def _generar_imagen_placa(self, clima, cielo_texto, icono, alertas, fecha, wp_client) -> int | None:
-        """Genera imagen de la placa de clima con imgkit (opcional)."""
+        """Genera imagen de la placa de clima con Pillow (sin dependencias de sistema)."""
         if not wp_client:
             return None
         try:
-            import imgkit
-            fondo = "linear-gradient(135deg, #f6d365 0%, #fda085 100%)"
-            if alertas:
-                fondo = "linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%)"
-            elif "lluvia" in cielo_texto.lower() or "tormenta" in cielo_texto.lower():
-                fondo = "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)"
-            elif "nublado" in cielo_texto.lower():
-                fondo = "linear-gradient(135deg, #bdc3c7 0%, #2c3e50 100%)"
+            import io
+            from PIL import Image, ImageDraw, ImageFont
 
-            alerta_html = ""
-            if alertas:
-                alerta_html = f"<div style='background:rgba(0,0,0,0.3);padding:10px;border-radius:8px;margin-top:15px;font-weight:bold;text-align:center;'>🚨 {alertas[0]['titulo']}</div>"
+            W, H = 1200, 675
 
-            placa_html = f"""<div style="width:800px;padding:40px;box-sizing:border-box;font-family:sans-serif;background:{fondo};color:#fff;border-radius:20px;">
-  <div style="display:flex;justify-content:space-between;opacity:0.9;margin-bottom:20px;">
-    <span>📍 Neuquén Capital</span><span>📅 {fecha}</span>
-  </div>
-  <div style="text-align:center;margin:25px 0;">
-    <div style="font-size:5em;line-height:1;">{icono}</div>
-    <div style="font-size:4.5em;font-weight:800;line-height:1;">{clima['temp_max']}°C <span style="font-size:0.5em;opacity:0.7;">/ {clima['temp_min']}°C</span></div>
-    <div style="font-size:1.6em;margin-top:8px;">{cielo_texto}</div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;background:rgba(255,255,255,0.2);border-radius:12px;padding:18px;">
-    <div style="text-align:center;"><span style="font-size:1.8em;">💨</span><div>Ráfagas</div><div style="font-weight:bold;">{clima['viento_rafagas']} km/h</div></div>
-    <div style="text-align:center;"><span style="font-size:1.8em;">☔</span><div>Prob. lluvia</div><div style="font-weight:bold;">{clima['prob_lluvia']}%</div></div>
-    <div style="text-align:center;"><span style="font-size:1.8em;">☀️</span><div>Índice UV</div><div style="font-weight:bold;">{clima['uv_index']}</div></div>
-  </div>
-  {alerta_html}
-</div>"""
-            img_bytes = imgkit.from_string(placa_html, False, options={
-                "format": "jpg", "width": 840, "disable-smart-width": "", "quality": 90,
-            })
-            if img_bytes:
-                return wp_client.upload_media_bytes(img_bytes, f"clima-{int(time.time())}.jpg")
+            # Colores de fondo según condición
+            cielo_l = cielo_texto.lower()
+            if alertas:
+                top, bot = (180, 30, 30), (100, 0, 0)
+            elif "tormenta" in cielo_l:
+                top, bot = (50, 50, 100), (20, 20, 60)
+            elif "lluvia" in cielo_l or "llovizna" in cielo_l:
+                top, bot = (70, 120, 200), (30, 60, 130)
+            elif "nublado" in cielo_l:
+                top, bot = (120, 140, 160), (60, 80, 100)
+            else:  # despejado / soleado
+                top, bot = (79, 172, 254), (0, 90, 200)
+
+            # Gradiente vertical
+            img = Image.new("RGB", (W, H))
+            px = img.load()
+            for y in range(H):
+                r = int(top[0] + (bot[0] - top[0]) * y / H)
+                g = int(top[1] + (bot[1] - top[1]) * y / H)
+                b = int(top[2] + (bot[2] - top[2]) * y / H)
+                for x in range(W):
+                    px[x, y] = (r, g, b)
+
+            draw = ImageDraw.Draw(img)
+            white = (255, 255, 255)
+            cream = (230, 230, 230)
+
+            # Fuentes — fallbacks progresivos
+            def _font(size, bold=False):
+                paths = [
+                    f"/usr/share/fonts/truetype/dejavu/DejaVuSans{'-Bold' if bold else ''}.ttf",
+                    f"/usr/share/fonts/truetype/liberation/LiberationSans{'-Bold' if bold else ''}.ttf",
+                    f"/usr/share/fonts/truetype/freefont/FreeSans{'Bold' if bold else ''}.ttf",
+                ]
+                for p in paths:
+                    try:
+                        return ImageFont.truetype(p, size)
+                    except Exception:
+                        pass
+                return ImageFont.load_default()
+
+            f_loc   = _font(32)
+            f_temp  = _font(160, bold=True)
+            f_cielo = _font(52)
+            f_min   = _font(40)
+            f_label = _font(30)
+            f_val   = _font(36, bold=True)
+            f_alerta = _font(34, bold=True)
+
+            def center_text(text, y, font, color=white):
+                bbox = draw.textbbox((0, 0), text, font=font)
+                x = (W - (bbox[2] - bbox[0])) // 2
+                draw.text((x, y), text, font=font, fill=color)
+
+            # Ubicación y fecha
+            draw.text((50, 40), "Neuquen Capital", font=f_loc, fill=cream)
+            fecha_bbox = draw.textbbox((0, 0), fecha, font=f_loc)
+            draw.text((W - fecha_bbox[2] + fecha_bbox[0] - 50, 40), fecha, font=f_loc, fill=cream)
+
+            # Temperatura principal
+            center_text(f"{clima['temp_max']}°C", 130, f_temp)
+
+            # Mín debajo de la máxima
+            center_text(f"min {clima['temp_min']}°C", 320, f_min, cream)
+
+            # Descripción del cielo
+            center_text(cielo_texto, 385, f_cielo)
+
+            # Banda de datos inferior
+            band_y = H - 140
+            draw.rectangle([(0, band_y), (W, H)], fill=(0, 0, 0, 80))
+
+            tercio = W // 3
+            datos = [
+                ("Rafagas", f"{clima['viento_rafagas']} km/h"),
+                ("Prob. lluvia", f"{clima['prob_lluvia']}%"),
+                ("Indice UV", str(clima['uv_index'])),
+            ]
+            for i, (label, val) in enumerate(datos):
+                cx = tercio * i + tercio // 2
+                lb = draw.textbbox((0, 0), label, font=f_label)
+                draw.text((cx - (lb[2] - lb[0]) // 2, band_y + 15), label, font=f_label, fill=cream)
+                vb = draw.textbbox((0, 0), val, font=f_val)
+                draw.text((cx - (vb[2] - vb[0]) // 2, band_y + 55), val, font=f_val, fill=white)
+
+            # Alerta si hay
+            if alertas:
+                alert_text = f"ALERTA: {alertas[0]['titulo'][:70]}"
+                draw.rectangle([(0, band_y - 60), (W, band_y)], fill=(180, 0, 0))
+                center_text(alert_text, band_y - 50, f_alerta)
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=88)
+            return wp_client.upload_media_bytes(buf.getvalue(), f"clima-{int(time.time())}.jpg")
+
         except ImportError:
-            self.log.warning("imgkit no instalado — sin imagen de placa.")
+            self.log.warning("Pillow no instalado — sin imagen de placa.")
         except Exception as e:
-            self.log.warning(f"Error generando placa: {e}")
+            self.log.warning(f"Error generando placa clima: {e}")
         return None
 
     @staticmethod
