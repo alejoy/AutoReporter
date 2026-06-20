@@ -1,8 +1,11 @@
 name: AutoReporter — Orquestador Diario
 
 on:
-  schedule:
-    - cron: '0 10 * * *'   # 10:00 UTC = 07:00 AM Argentina (UTC-3)
+  # Cron diario desactivado — la publicación automática la maneja ahora
+  # el pipeline V2 (APScheduler en el VPS). Mantenemos workflow_dispatch
+  # para poder disparar una corrida manual si hace falta.
+  # schedule:
+  #   - cron: '0 10 * * *'   # 10:00 UTC = 07:00 AM Argentina (UTC-3)
   workflow_dispatch:
     inputs:
       dry_run:
